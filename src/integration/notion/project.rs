@@ -1,10 +1,12 @@
+use std::default;
+
 use futures::future::join_all;
 use reqwest;
 use serde_json::Value;
 
 use crate::integration::notion::member::get_member_by_id;
 
-use super::{env::*, member::Member};
+use super::{env::*, member::NotionMember};
 
 #[derive(Debug, Clone)]
 pub enum Status {
@@ -26,14 +28,20 @@ impl From<&str> for Status {
     }
 }
 
-#[derive(Debug, Clone)]
+impl default::Default for Status {
+    fn default() -> Self {
+        Status::NotStarted
+    }
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct Project {
     pub id: String,
     pub name: String,
     pub status: Status,
     pub github: String,
-    pub pm: Member,
-    pub participants: Vec<Member>,
+    pub pm: NotionMember,
+    pub participants: Vec<NotionMember>,
     pub category_id: String,
 }
 
@@ -69,8 +77,10 @@ impl Project {
                     .as_array()
                     .unwrap_or(&Vec::new())
                     .iter()
-                    .map(|member| {
-                        get_member_by_id(member["id"].as_str().unwrap_or_default().to_string())
+                    .map(|notion_member| {
+                        get_member_by_id(
+                            notion_member["id"].as_str().unwrap_or_default().to_string(),
+                        )
                     }),
             )
             .await
@@ -81,6 +91,19 @@ impl Project {
                 .as_str()
                 .unwrap_or_default()
                 .to_string(),
+        }
+    }
+
+    // 기본값을 제공하는 메서드
+    pub fn default() -> Self {
+        Project {
+            id: String::new(),
+            name: String::new(),
+            status: Status::NotStarted,
+            github: String::from("https://github.com/"),
+            pm: NotionMember::default(),
+            participants: Vec::new(),
+            category_id: String::from("category_id"),
         }
     }
 }
@@ -180,9 +203,10 @@ pub async fn create_project(project: &Project) -> Result<String, Box<dyn std::er
                     Status::Maintenance => "유지보수",
                     Status::Completed => "완료",
                 } } },
-                "github": { "url": project.github },
+                // "github": { "url": project.github },
                 "PM": { "people": [{ "id": project.pm.id }] },
-                "participants": { "people": project.participants.iter().map(|p| serde_json::json!({ "id": p.id })).collect::<Vec<_>>() }
+                //"participants": { "people": project.participants.iter().map(|p| serde_json::json!({ "id": p.id })).collect::<Vec<_>>() }
+                "category_id": { "rich_text": [{ "text": { "content": project.category_id } }] }
             }
         }))
         .send()
@@ -236,6 +260,8 @@ pub async fn update_project(
         }))
         .send()
         .await?;
+
+    println!("{:?}", project);
 
     if response.status().is_success() {
         Ok(())

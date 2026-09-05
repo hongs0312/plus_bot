@@ -1,11 +1,11 @@
 mod cache;
 mod commands; // 봇이 관리할 캐시 모듈 등록
+mod integration;
 
-use std::collections::HashMap;
 use std::env;
 use std::sync::Arc;
 
-use serenity::all::{GuildMemberUpdateEvent, Interaction, Member};
+use serenity::all::Interaction;
 use serenity::async_trait;
 use serenity::model::event::ResumedEvent;
 use serenity::model::gateway::Ready;
@@ -70,26 +70,6 @@ impl EventHandler for Handler {
     async fn resume(&self, _: Context, _: ResumedEvent) {
         info!("Resumed");
     }
-
-    // 누군가 닉네임을 바꾸거나 역할을 바꿀 시 캐시를 갱신하도록 이벤트 핸들러 추가
-    async fn guild_member_update(
-        &self,
-        ctx: Context,
-        _old_member: Option<Member>,
-        new_member: Option<Member>,
-        _event: GuildMemberUpdateEvent,
-    ) {
-        if let Some(new_mem) = new_member {
-            if let Some(tx) = ctx.data.read().await.get::<CacheNotifyKey>() {
-                let _ = tx
-                    .send(CacheCommand::UpdateSingleMember {
-                        user_id: new_mem.user.id,
-                        display_name: new_mem.display_name().to_string(),
-                    })
-                    .await;
-            }
-        }
-    }
 }
 
 #[tokio::main]
@@ -119,21 +99,17 @@ async fn main() {
         .expect("Err creating client");
 
     // 캐시 저장소 초기 설정
-    let shared_cache = Arc::new(RwLock::new(cache::BotCache {
-        all_members: HashMap::new(),
-        project_mapping: HashMap::new(),
-        project_pms: HashMap::new(),
-    }));
+    let shared_cache = Arc::new(RwLock::new(cache::BotCache::new()));
 
-    // 캐시 동기화 스레드 구동
-    let cache_tx = cache::start_cache_thread(shared_cache.clone(), client.http.clone(), guild_id);
+    // // 캐시 동기화 스레드 구동
+    // let cache_tx = cache::start_cache_thread(shared_cache.clone(), client.http.clone(), guild_id);
 
     // 클라이언트 데이터에 캐시 및 캐시 동기화 채널 저장
     {
         let mut data = client.data.write().await;
         data.insert::<ShardManagerContainer>(client.shard_manager.clone());
         data.insert::<cache::SharedCacheKey>(shared_cache.clone());
-        data.insert::<CacheNotifyKey>(cache_tx);
+        // data.insert::<CacheNotifyKey>(cache_tx);
     }
 
     // Ctrl + C 종료 핸들러 스레드 시작
